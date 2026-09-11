@@ -1,0 +1,15 @@
+[Unit]
+Description=N0JCG GMRS Scanner
+After=network.target
+
+[Service]
+Type=simple
+User=gmrs-scanner
+WorkingDirectory=/opt/n0jcg-gmrs-scanner
+Environment=PYTHONPATH=/opt/n0jcg-gmrs-scanner/src
+ExecStart=/usr/bin/python3 -m n0jcg_gmrs_scanner.server --host 0.0.0.0 --port 8089
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
