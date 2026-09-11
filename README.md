@@ -2,7 +2,7 @@
 
 Receive-only Raspberry Pi GMRS/FRS channel scanner for an RTL-SDR. It performs a one-shot FFT survey across the 462/467 MHz channel plan, scores active channels, tunes the strongest candidate with NFM audio, and provides skip, block, and manual channel controls.
 
-This is an independent product. It uses RTL-SDR serial `00000163` by default; change the serial in the service or application configuration when assigning a different dongle. Serial identity is preferred over unstable USB indexes.
+This is an independent product. It uses RTL-SDR serial `00000462` by default; change the serial in the service or application configuration when assigning a different dongle. Serial identity is preferred over unstable USB indexes.
 
 ## Development
 
