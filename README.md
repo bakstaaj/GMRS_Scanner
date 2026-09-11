@@ -19,4 +19,6 @@ Live scanning requires `rtl_power`, `rtl_fm`, a suitable 462/467 MHz antenna pat
 
 On Debian/Raspberry Pi OS, install the complete RTL-SDR utility set with `sudo apt-get update && sudo apt-get install -y rtl-sdr`. This package supplies `rtl_eeprom`, `rtl_test`, `rtl_power`, `rtl_fm`, `rtl_sdr`, and `rtl_tcp`. Confirm the tools with `command -v rtl_eeprom rtl_test rtl_power rtl_fm rtl_sdr rtl_tcp` before starting the service.
 
+If `rtl_test` reports `usb_open error -3`, run the installer again so it reloads `/lib/udev/rules.d/rtl-sdr.rules` and grants `gmrs-scanner` membership in `plugdev`. Unplug and reconnect the dongle, then verify with `sudo -u gmrs-scanner rtl_test -d 0`.
+
 The channel frequencies follow the FCC-published shared 22-channel plan. This application only receives; it does not transmit or control PTT. Operators remain responsible for lawful radio use.
