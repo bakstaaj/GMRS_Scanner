@@ -14,10 +14,13 @@ sudo usermod -aG plugdev gmrs-scanner
 sudo install -d -o root -g root "$APP_DIR"
 sudo cp -a "$SCRIPT_DIR/src" "$SCRIPT_DIR/web" "$SCRIPT_DIR/VERSION" "$SCRIPT_DIR/README.md" "$APP_DIR/"
 sudo install -m 0644 "$SCRIPT_DIR/systemd/n0jcg-gmrs-scanner.service" /etc/systemd/system/
+sudo install -m 0644 "$SCRIPT_DIR/deploy/99-n0jcg-gmrs-scanner.rules" /etc/udev/rules.d/99-n0jcg-gmrs-scanner.rules
 if [ -f /lib/udev/rules.d/rtl-sdr.rules ]; then
   sudo udevadm control --reload-rules
   sudo udevadm trigger --subsystem-match=usb
 fi
+sudo udevadm control --reload-rules
+sudo udevadm trigger --action=change --subsystem-match=usb
 sudo chown -R gmrs-scanner:gmrs-scanner "$APP_DIR"
 sudo systemctl daemon-reload
 sudo systemctl enable --now n0jcg-gmrs-scanner.service

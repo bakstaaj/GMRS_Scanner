@@ -1,0 +1,2 @@
+# N0JCG GMRS Scanner: allow the RTL2838 dongle to be opened by plugdev users.
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE="0660", GROUP="plugdev", TAG+="uaccess"
