@@ -4,7 +4,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
-from . import PRODUCT_NAME, VERSION, REQUIRED_RTL_SERIAL
+from . import LICENSE_PREFIX, PRODUCT_ID, PRODUCT_NAME, REQUIRED_RTL_SERIAL, TRIAL_SECONDS, VERSION
 from .channels import GMRS_CHANNELS, channel_for_number
 from .fft_scan import FftPoint, MIN_VALID_SNR_DB, score_channels, simulated_spectrum
 
@@ -19,7 +19,7 @@ class RadioState:
     def __init__(self, simulate: bool = False) -> None:
         self.simulate = simulate; self.lock = threading.RLock()
         self.settings_path = RUNTIME / "settings.json"
-        self.settings = {"rtl_serial": REQUIRED_RTL_SERIAL, "rf_gain_db": 40.0, "channel_controls": {}, "registration": {}}
+        self.settings = {"rtl_serial": REQUIRED_RTL_SERIAL, "rf_gain_db": 40.0, "channel_controls": {}, "registration": {}, "trial_started_at": None}
         self._load_settings(); self.points = []; self.candidates = []; self.tuned = None; self.tune_frequency_hz = None; self.running = False; self.manual_tuned = False; self.audio_process = None; self.scan_thread = None; self.scan_stop = threading.Event(); self.rescan_event = threading.Event(); self.first_scan_event = threading.Event(); self.scan_generation = 0; self.scan_cycles = 0
 
     def _load_settings(self) -> None:
@@ -27,6 +27,7 @@ class RadioState:
             saved = json.loads(self.settings_path.read_text(encoding="utf-8")); self.settings.update({key: saved[key] for key in ("rtl_serial", "rf_gain_db") if key in saved})
             if isinstance(saved.get("channel_controls"), dict): self.settings["channel_controls"] = saved["channel_controls"]
             if isinstance(saved.get("registration"), dict): self.settings["registration"] = saved["registration"]
+            if saved.get("trial_started_at") is not None: self.settings["trial_started_at"] = float(saved["trial_started_at"])
         except (OSError, ValueError, TypeError): pass
 
     def _save_settings(self) -> None:
@@ -59,6 +60,38 @@ class RadioState:
             except subprocess.TimeoutExpired: process.kill()
         self.audio_process = None; self.running = False
 
+    def _registered(self) -> bool:
+        return bool(self.settings.get("registration", {}).get("registered"))
+
+    def _trial_remaining(self) -> int:
+        started = self.settings.get("trial_started_at")
+        if self._registered() or started is None: return TRIAL_SECONDS
+        return max(0, int((float(started) + TRIAL_SECONDS) - time.time()))
+
+    def _trial_expired(self) -> bool:
+        return not self._registered() and self.settings.get("trial_started_at") is not None and self._trial_remaining() <= 0
+
+    def _begin_trial_locked(self) -> bool:
+        if self._registered(): return True
+        if self._trial_expired(): return False
+        if self.settings.get("trial_started_at") is None:
+            self.settings["trial_started_at"] = time.time(); self._save_settings()
+        return True
+
+    def _trial_expired_stop(self) -> None:
+        with self.lock:
+            if self._registered() or not self._trial_expired(): return
+            self.stop()
+
+    def _arm_trial_timer_locked(self) -> None:
+        if self._registered(): return
+        remaining = self._trial_remaining()
+        if remaining <= 0: return
+        timer = getattr(self, "trial_timer", None)
+        if timer: timer.cancel()
+        self.trial_timer = threading.Timer(max(0.1, remaining), self._trial_expired_stop)
+        self.trial_timer.daemon = True; self.trial_timer.start()
+
     def _scan_once(self, generation: int) -> None:
         with self.lock:
             if generation != self.scan_generation or self.scan_stop.is_set(): return
@@ -85,6 +118,8 @@ class RadioState:
     def start_scanner(self) -> dict:
         with self.lock:
             if self.scan_thread and self.scan_thread.is_alive(): return self.snapshot()
+            if not self._begin_trial_locked(): return self.snapshot({"error": "The five-minute trial has expired. Activate a license to continue scanning.", "trial_expired": True})
+            self._arm_trial_timer_locked()
             self.scan_generation += 1; generation = self.scan_generation; self.scan_stop = threading.Event(); self.rescan_event = threading.Event(); self.first_scan_event = threading.Event(); self.running = True; self.manual_tuned = False
             self.scan_thread = threading.Thread(target=self._scanner_loop, args=(generation,), name="gmrs-scanner-loop", daemon=True); self.scan_thread.start()
         self.first_scan_event.wait(21)
@@ -126,6 +161,8 @@ class RadioState:
 
     def tune(self, number: int) -> dict:
         with self.lock:
+            if not self._begin_trial_locked(): raise ValueError("The five-minute trial has expired. Activate a license to continue scanning.")
+            self._arm_trial_timer_locked()
             channel = channel_for_number(number).as_dict(); self.scan_generation += 1; self.scan_stop.set(); self.rescan_event.set(); self._stop_audio_only(); self.tuned = channel; self.tune_frequency_hz = channel["frequency_hz"]; self.manual_tuned = True; self.running = True
             if not self.simulate: self._start_audio_only(channel)
             return self.snapshot()
@@ -158,22 +195,26 @@ class RadioState:
             return self.snapshot()
 
     def activate_license(self, license_serial: str, email: str) -> dict:
+        license_serial = license_serial.strip().upper()
+        if not license_serial.startswith(LICENSE_PREFIX): raise ValueError(f"License S/N must begin with {LICENSE_PREFIX}")
         raw_serial = f"{int(self.settings['rtl_serial']):016X}"
         installation_serial = "N0JCG-" + "-".join(raw_serial[i:i + 4] for i in range(0, 16, 4))
-        payload = json.dumps({"license_serial": license_serial, "email": email, "installation_serial": installation_serial, "product_slug": "gmrs-scanner", "app_version": VERSION}).encode()
+        payload = json.dumps({"license_serial": license_serial, "email": email, "installation_serial": installation_serial, "product_id": PRODUCT_ID, "product_slug": PRODUCT_ID, "app_version": VERSION}).encode()
         request = urllib.request.Request("https://www.n0jcg.com/api/v1/licenses/validate", data=payload, headers={"Content-Type": "application/json"}, method="POST")
         try:
             with urllib.request.urlopen(request, timeout=10) as response: result = json.loads(response.read().decode("utf-8"))
         except Exception as error: raise ValueError(f"licensing service unavailable: {error}")
         if not result.get("valid"): raise ValueError(result.get("error") or result.get("reason") or "license rejected")
-        self.settings["registration"] = {"registered": True, "license_suffix": result.get("license_suffix", ""), "serial_number": installation_serial, "email": email}
+        self.settings["registration"] = {"registered": True, "license_suffix": result.get("license_suffix", ""), "serial_number": installation_serial, "email": email, "product_id": PRODUCT_ID, "license_prefix": LICENSE_PREFIX}
+        timer = getattr(self, "trial_timer", None)
+        if timer: timer.cancel()
         self._save_settings(); return self.snapshot()
 
     def snapshot(self, extra: dict | None = None) -> dict:
         tuned = dict(self.tuned) if self.tuned else None
         if tuned: tuned["scan_control"] = self.control(int(tuned["number"]))
         if tuned and self.tune_frequency_hz: tuned.update({"tuned_frequency_hz": self.tune_frequency_hz, "offset_hz": self.tune_frequency_hz - tuned["frequency_hz"]})
-        result = {"ok": True, "product": PRODUCT_NAME, "version": VERSION, "simulate": self.simulate, "rtl_serial": self.settings["rtl_serial"], "running": self.running, "manual_tuned": self.manual_tuned, "scan_cycles": self.scan_cycles, "tuned": tuned, "registration": self.settings.get("registration", {}), "channels": self.channel_payload(), "candidates": [{"channel": c.channel, "peak_frequency_hz": c.peak_frequency_hz, "peak_dbfs": c.peak_dbfs, "noise_floor_dbfs": c.noise_floor_dbfs, "snr_db": c.snr_db} for c in self.candidates]}
+        result = {"ok": True, "product": PRODUCT_NAME, "product_id": PRODUCT_ID, "license_prefix": LICENSE_PREFIX, "version": VERSION, "simulate": self.simulate, "rtl_serial": self.settings["rtl_serial"], "running": self.running, "manual_tuned": self.manual_tuned, "scan_cycles": self.scan_cycles, "registered": self._registered(), "trial_mode": not self._registered(), "trial_remaining_seconds": self._trial_remaining(), "trial_expired": self._trial_expired(), "tuned": tuned, "registration": self.settings.get("registration", {}), "channels": self.channel_payload(), "candidates": [{"channel": c.channel, "peak_frequency_hz": c.peak_frequency_hz, "peak_dbfs": c.peak_dbfs, "noise_floor_dbfs": c.noise_floor_dbfs, "snr_db": c.snr_db} for c in self.candidates]}
         if extra: result.update(extra)
         return result
 
