@@ -14,11 +14,11 @@
         <span class="brand-divider" aria-hidden="true"></span>
         <h1>GMRS Scanner</h1>
       </div>
-      <div class="header-actions"><span id="connectionStatus" class="pill warn">CONNECTING</span></div>
+      <div class="header-actions"><button id="menu-toggle" class="menu-button" type="button" aria-expanded="false" aria-controls="menu-panel" aria-label="Open operator menu">☰ <span>Menu</span></button><span id="connectionStatus" class="pill warn">CONNECTING</span></div>
     </header>
-    <section class="toolbar"><button id="menu-toggle" class="secondary" type="button" aria-expanded="false" aria-controls="menu-panel">☰ Menu</button></section>
+    <div id="menu-backdrop" class="menu-backdrop" hidden></div>
     <section id="menu-panel" class="menu-panel" hidden>
-      <div class="section-title"><h2>Settings and registration</h2><span>scanner setup</span></div>
+      <div class="menu-header"><div class="section-title"><h2>Settings and registration</h2><span>scanner setup</span></div><button id="menu-close" class="secondary" type="button">Close</button></div>
       <div class="menu-grid"><label>RF gain <input id="gain" type="number" min="0" max="49.6" step="0.1" value="40"> dB</label><button id="save" class="secondary" type="button">Save gain</button></div>
       <div class="registration"><h3>Product registration</h3><p>Enter the N0JCG license S/N and purchaser email.</p><div class="menu-grid"><label>License S/N<input id="licenseSerialInput" type="text" autocomplete="off" placeholder="N0JCG-GMR-…"></label><label>Email<input id="licenseEmailInput" type="email" autocomplete="email" placeholder="operator@example.com"></label></div><button id="activateLicenseBtn" type="button">Activate license</button><p id="registrationStatusText" class="muted">Installation S/N: loading…</p></div>
     </section>
